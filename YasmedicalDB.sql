@@ -23,7 +23,7 @@ CREATE TABLE Productos (
   codigo varchar(15) unique,
   descripcion varchar(100) NOT NULL,
   stock INT NOT NULL,
-  valor decimal(10,2) NOT NULL,
+  valor decimal(10,2),
   PRIMARY KEY (codigo)
 );
 
@@ -212,8 +212,113 @@ BEGIN
 END //
 DELIMITER ;
 
-SELECT ObtenerNombreCliente('12345678-9') AS nombre_cliente
+SELECT ObtenerNombreCliente('12345678-9') AS nombre_cliente;
 
 
 -- ################################################# STORED PROCEDURE ################################################
+
+-- 1. PROCEDIMIENTO PARA ACTUALIZAR EL STOCK DE PRODUCTOS
+DELIMITER //
+CREATE PROCEDURE UpdateStock(
+    IN p_codigo VARCHAR(15),
+    IN p_cant INT
+)
+BEGIN
+    UPDATE Productos
+    SET stock = stock + p_cant
+    WHERE codigo = p_codigo;
+END //
+DELIMITER ;
+
+CALL UpdateStock('INSUMO002', 30);
+
+SELECT * FROM Productos;
+
+-- 2. PROCEDIMIENTO PARA GENERAR FACTURA
+DELIMITER //
+CREATE PROCEDURE AddBill(
+    IN p_ClientRut VARCHAR(12),
+    IN p_cod_product VARCHAR(15),
+    IN p_SellerRut VARCHAR(12),
+    IN p_amount INT,
+    IN p_date DATE
+)
+BEGIN
+    DECLARE p_price DECIMAL(10, 2);
+
+    SELECT valor INTO p_price
+    FROM Productos
+    WHERE codigo = p_cod_product;  
+    
+    INSERT INTO Facturas (rut_cliente, cod_producto, valor_producto, rut, cantidad, fecha)
+    VALUES (p_ClientRut, p_cod_product, p_price, p_SellerRut, p_amount, p_date);
+END //
+DELIMITER ;
+
+CALL AddBill('01234567-8', 'INSUMO002', '12345678-1', 20, NOW());
+
+SELECT * FROM Facturas;
+
+-- ################################################# TRIGGERS ################################################
+
+-- 1. TRIGGER PARA AUDITAR CAMBIOS EN PRODUCTOS
+
+CREATE TABLE AuditoriaProductos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    codigo_producto VARCHAR(15),
+    descripcion_anterior VARCHAR(100),
+    descripcion_nueva VARCHAR(100),
+    stock_anterior INT,
+    stock_nuevo INT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DELIMITER //
+
+CREATE TRIGGER after_products_update
+AFTER UPDATE ON Productos
+FOR EACH ROW
+BEGIN
+    INSERT INTO AuditoriaProductos (codigo_producto, descripcion_anterior, descripcion_nueva, stock_anterior, stock_nuevo)
+    VALUES (OLD.codigo, OLD.descripcion, NEW.descripcion, OLD.stock, NEW.stock);
+END;
+
+//
+
+DELIMITER ;
+
+UPDATE Productos
+SET descripcion = 'gerdex', stock = 15
+WHERE codigo = 'INSUMO003';
+
+
+
+-- 2. TRIGGER PARA EVITAR GENERAR FACTURAS CON STOCK NEGATIVO
+
+DROP TRIGGER IF EXISTS before_facturas_insert;
+DELIMITER //
+CREATE TRIGGER before_facturas_insert
+BEFORE INSERT ON Facturas
+FOR EACH ROW
+BEGIN
+    DECLARE stock_Actual INT;
+
+    SELECT stock INTO stock_actual
+    FROM Productos
+    WHERE codigo = NEW.cod_producto;
+
+    IF stock_actual < NEW.cantidad THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'No hay suficiente stock para completar la factura.';
+    END IF;
+END;
+
+//
+
+DELIMITER ;
+
+INSERT INTO Facturas (rut_cliente, cod_producto, valor_producto, rut, cantidad, fecha) 
+VALUES ('23456789-0', 'INSUMO002', 250.50, '12345678-1', 81, '2024-02-17');
+
+
 
